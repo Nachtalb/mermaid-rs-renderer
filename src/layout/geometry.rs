@@ -262,6 +262,12 @@ pub(super) fn point_in_polygon_strict(point: (f32, f32), polygon: &[(f32, f32)])
 }
 
 pub(super) fn point_inside_node_shape_strict(node: &NodeLayout, point: (f32, f32)) -> bool {
+    // Every shape lies within its node box, so a point outside the box can't be
+    // inside the shape. This cheap check skips the polygon allocation and test
+    // for the vast majority of calls (edge sampling against every node).
+    if !point_inside_node_bounds_strict(node, point) {
+        return false;
+    }
     match node.shape {
         NodeShape::Circle | NodeShape::DoubleCircle => {
             let (cx, cy) = node_center(node);
