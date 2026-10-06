@@ -2273,6 +2273,36 @@ pub(in crate::layout) fn build_routed_edges(ctx: RoutedEdgeBuildContext<'_>) -> 
         tiny_graph,
         stage_metrics,
     } = ctx;
+    // Experimental: MMDR_ROUTER=grid swaps in the sparse-grid A* router.
+    if graph.kind == DiagramKind::Flowchart
+        && std::env::var_os("MMDR_ROUTER").is_some_and(|v| v == "grid")
+    {
+        let start = Instant::now();
+        let mut stats = super::grid_router::GridRouterStats::default();
+        let edges = super::grid_router::build_grid_routed_edges(
+            graph,
+            nodes,
+            subgraphs,
+            config,
+            edge_route_labels,
+            edge_start_labels,
+            edge_end_labels,
+            &mut stats,
+        );
+        if std::env::var_os("MMDR_ROUTER_STATS").is_some() {
+            eprintln!(
+                "grid_router: {:?} in {}us",
+                stats,
+                start.elapsed().as_micros()
+            );
+        }
+        if let Some(metrics) = stage_metrics {
+            metrics.edge_routing_us = metrics
+                .edge_routing_us
+                .saturating_add(start.elapsed().as_micros());
+        }
+        return edges;
+    }
     // Experimental: MMDR_TRACK_ROUTER=1 swaps in the layered track-assignment router.
     if graph.kind == DiagramKind::Flowchart
         && std::env::var_os("MMDR_TRACK_ROUTER").is_some_and(|v| v == "1")

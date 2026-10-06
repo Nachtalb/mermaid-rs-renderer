@@ -2,6 +2,7 @@ pub(super) mod analysis;
 pub(super) mod aspect_fold;
 pub(super) mod edge_pipeline;
 pub(super) mod finalize;
+pub(super) mod grid_router;
 pub(super) mod layered_engine;
 pub(super) mod manual_layout;
 pub(super) mod objectives;
