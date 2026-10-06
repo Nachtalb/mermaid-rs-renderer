@@ -7544,6 +7544,17 @@ A["foo & bar"] & B --> C"#;
     }
 
     #[test]
+    fn parse_sequence_arrow_inside_label_is_text() {
+        // `-->>` in the label must not be taken for the message arrow.
+        let input = "sequenceDiagram\nA->>B: forwards -->> to C";
+        let parsed = parse_mermaid(input).unwrap();
+        let e = &parsed.graph.edges[0];
+        assert_eq!((e.from.as_str(), e.to.as_str()), ("A", "B"));
+        assert_eq!(e.label.as_deref(), Some("forwards -->> to C"));
+        assert_eq!(e.style, crate::ir::EdgeStyle::Solid);
+    }
+
+    #[test]
     fn parse_sequence_database_participant() {
         let input = "sequenceDiagram\ndatabase DB\nDB->>DB: ping";
         let parsed = parse_mermaid(input).unwrap();
