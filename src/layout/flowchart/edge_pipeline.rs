@@ -1198,7 +1198,7 @@ fn port_route_score_is_better(candidate: PortRouteScore, best: PortRouteScore) -
     false
 }
 
-fn effective_edge_endpoint_layouts(
+pub(super) fn effective_edge_endpoint_layouts(
     graph: &Graph,
     nodes: &BTreeMap<String, NodeLayout>,
     subgraphs: &[SubgraphLayout],
@@ -2273,6 +2273,38 @@ pub(in crate::layout) fn build_routed_edges(ctx: RoutedEdgeBuildContext<'_>) -> 
         tiny_graph,
         stage_metrics,
     } = ctx;
+    // Experimental: MMDR_TRACK_ROUTER=1 swaps in the layered track-assignment router.
+    if graph.kind == DiagramKind::Flowchart
+        && std::env::var_os("MMDR_TRACK_ROUTER").is_some_and(|v| v == "1")
+    {
+        let start = Instant::now();
+        let mut stats = super::track_router::TrackRouterStats::default();
+        let edges = super::track_router::build_track_routed_edges(
+            graph,
+            nodes,
+            subgraphs,
+            config,
+            edge_route_labels,
+            edge_start_labels,
+            edge_end_labels,
+            &mut stats,
+        );
+        if std::env::var_os("MMDR_TRACK_STATS").is_some() {
+            eprintln!(
+                "track_router: routed={} fallback={} tracks={} in {}us",
+                stats.routed,
+                stats.fallback,
+                stats.tracks,
+                start.elapsed().as_micros()
+            );
+        }
+        if let Some(metrics) = stage_metrics {
+            metrics.edge_routing_us = metrics
+                .edge_routing_us
+                .saturating_add(start.elapsed().as_micros());
+        }
+        return edges;
+    }
     let obstacles = build_obstacles(nodes, subgraphs, config);
     let label_obstacles = build_label_obstacles_for_routing(nodes, subgraphs);
     let routing_grid = if config.flowchart.routing.enable_grid_router && !tiny_graph {
