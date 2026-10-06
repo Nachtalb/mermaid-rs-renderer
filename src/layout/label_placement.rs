@@ -1407,6 +1407,10 @@ fn center_label_tighten_candidates(
     bounds: Option<(f32, f32)>,
 ) -> Vec<(f32, f32)> {
     let mut candidates = Vec::new();
+    // Dedup on a 0.35 px grid with a cheap hash set instead of a linear scan
+    // per push (was O(n^2) over ~1.6k candidates).
+    let mut seen: HashSet<(i32, i32), std::hash::BuildHasherDefault<FxLikeHasher>> =
+        HashSet::default();
     let mut push_candidate = |mut center: (f32, f32)| {
         if let Some(bound) = bounds {
             center = clamp_label_center_to_bounds(
@@ -1418,7 +1422,13 @@ fn center_label_tighten_candidates(
                 bound,
             );
         }
-        push_center_unique(&mut candidates, center);
+        let key = (
+            (center.0 / 0.35).round() as i32,
+            (center.1 / 0.35).round() as i32,
+        );
+        if seen.insert(key) {
+            candidates.push(center);
+        }
     };
     push_candidate(current_center);
 
@@ -2646,6 +2656,10 @@ fn flowchart_center_label_candidates(
     bounds: Option<(f32, f32)>,
 ) -> Vec<(f32, f32)> {
     let mut candidates = Vec::new();
+    // Dedup on a 0.35 px grid with a cheap hash set instead of a linear scan
+    // per push (was O(n^2) over ~1.6k candidates).
+    let mut seen: HashSet<(i32, i32), std::hash::BuildHasherDefault<FxLikeHasher>> =
+        HashSet::default();
     let mut push_candidate = |mut center: (f32, f32)| {
         if let Some(bound) = bounds {
             center = clamp_label_center_to_bounds(
@@ -2657,7 +2671,13 @@ fn flowchart_center_label_candidates(
                 bound,
             );
         }
-        push_center_unique(&mut candidates, center);
+        let key = (
+            (center.0 / 0.35).round() as i32,
+            (center.1 / 0.35).round() as i32,
+        );
+        if seen.insert(key) {
+            candidates.push(center);
+        }
     };
     push_candidate(initial_center);
 
@@ -3211,13 +3231,13 @@ fn segments_intersect(a: (f32, f32), b: (f32, f32), c: (f32, f32), d: (f32, f32)
 }
 
 fn segment_intersects_rect(a: (f32, f32), b: (f32, f32), rect: &Rect) -> bool {
+    let (x0, y0, x1, y1) = (rect.0, rect.1, rect.0 + rect.2, rect.1 + rect.3);
+    if a.0.max(b.0) < x0 || a.0.min(b.0) > x1 || a.1.max(b.1) < y0 || a.1.min(b.1) > y1 {
+        return false;
+    }
     if point_inside_rect(a, rect) || point_inside_rect(b, rect) {
         return true;
     }
-    let x0 = rect.0;
-    let y0 = rect.1;
-    let x1 = rect.0 + rect.2;
-    let y1 = rect.1 + rect.3;
     let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
     corners
         .iter()
@@ -3719,13 +3739,15 @@ fn clamp_label_center_to_bounds(
 struct ObstacleGrid {
     cell: f32,
     /// Maps grid cell (ix, iy) to indices into the obstacle list.
-    cells: HashMap<(i32, i32), Vec<usize>>,
+    cells: HashMap<(i32, i32), Vec<usize>, FxBuild>,
 }
+
+type FxBuild = std::hash::BuildHasherDefault<FxLikeHasher>;
 
 impl ObstacleGrid {
     fn new(cell: f32, rects: &[Rect]) -> Self {
         let cell = cell.max(16.0);
-        let mut cells: HashMap<(i32, i32), Vec<usize>> = HashMap::new();
+        let mut cells: HashMap<(i32, i32), Vec<usize>, FxBuild> = HashMap::default();
         for (i, rect) in rects.iter().enumerate() {
             let x0 = (rect.0 / cell).floor() as i32;
             let y0 = (rect.1 / cell).floor() as i32;
@@ -3759,7 +3781,7 @@ impl ObstacleGrid {
         let y0 = (rect.1 / self.cell).floor() as i32;
         let x1 = ((rect.0 + rect.2) / self.cell).floor() as i32;
         let y1 = ((rect.1 + rect.3) / self.cell).floor() as i32;
-        let mut seen = HashSet::new();
+        let mut seen: HashSet<usize, FxBuild> = HashSet::default();
         (x0..=x1)
             .flat_map(move |ix| (y0..=y1).map(move |iy| (ix, iy)))
             .flat_map(move |key| {
@@ -4526,5 +4548,29 @@ mod tests {
             near.0,
             far.0
         );
+    }
+}
+
+/// Minimal multiplicative hasher for small integer keys (std SipHash dominated profiles).
+#[derive(Default)]
+struct FxLikeHasher(u64);
+
+impl std::hash::Hasher for FxLikeHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(b as u64);
+        }
+    }
+    fn write_u32(&mut self, i: u32) {
+        self.write_u64(i as u64);
+    }
+    fn write_i32(&mut self, i: i32) {
+        self.write_u64(i as u32 as u64);
+    }
+    fn write_u64(&mut self, i: u64) {
+        self.0 = (self.0.rotate_left(5) ^ i).wrapping_mul(0x51_7c_c1_b7_27_22_0a_95);
     }
 }
